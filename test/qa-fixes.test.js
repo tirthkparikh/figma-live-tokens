@@ -80,3 +80,14 @@ test('Figma: style nodes are only downloaded when a style changed; 429 Retry-Aft
     await assert.rejects(pull({ file: 'abc', token: 't', cache }), e => e.retryAfter === 7200 && /low-limit seat/.test(e.message) && /2\.0 hours/.test(e.message));
   } finally { delete process.env.FIGMA_API_URL; srv.close(); }
 });
+
+test('names from real Figma files: separators and $ prefixes collapse to single dashes', async () => {
+  const { stylesToTokens } = await import('../src/figma.js');
+  const tree = stylesToTokens(
+    [{ node_id: '1', name: 'Selected - Inner/Border bottom', style_type: 'FILL' }, { node_id: '2', name: '$ui-03 border', style_type: 'FILL' }],
+    { 1: { document: { fills: [{ type: 'SOLID', color: { r: 0, g: 0.38, b: 1, a: 1 } }] } }, 2: { document: { fills: [{ type: 'SOLID', color: { r: 0.88, g: 0.88, b: 0.88, a: 1 } }] } } },
+  );
+  const css = render(load(tree))['tokens.css'];
+  assert.match(css, /--selected-inner-border-bottom: #0061ff/);
+  assert.match(css, /--ui-03-border: #e0e0e0/);
+});

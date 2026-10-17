@@ -32,7 +32,8 @@ export function rgbaToHex({ r, g, b, a = 1 }, opacity = 1) {
 }
 
 // "Colors / Brand / 500" -> ["colors", "brand", "500"]
-export const splitName = name => name.split('/').map(s => s.trim()).filter(Boolean);
+// A leading "$" (Carbon names styles "$ui-03") would mark the key as metadata in DTCG JSON, so drop it.
+export const splitName = name => name.split('/').map(s => s.trim().replace(/^\$+/, '').trim()).filter(Boolean);
 
 function setPath(tree, path, token) {
   let node = tree;

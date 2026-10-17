@@ -1,6 +1,6 @@
 {
   "name": "@tirthlabs/figma-live-tokens",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Figma variables and styles to CSS variables, Tailwind v3/v4, SCSS and JS. Serve them live so your website updates when the design changes, with no redeploy.",
   "type": "module",
   "bin": {

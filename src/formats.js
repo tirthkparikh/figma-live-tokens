@@ -6,6 +6,7 @@ const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 export const kebab = s => String(s)
   .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
   .replace(/[^\p{L}\p{N}_-]+/gu, '-')
+  .replace(/-{2,}/g, '-')  // "Selected - Inner" -> selected-inner, not selected---inner
   .replace(/^-+|-+$/g, '')
   .toLowerCase();
 
