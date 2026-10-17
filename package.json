@@ -1,0 +1,55 @@
+{
+  "name": "@tirthlabs/figma-live-tokens",
+  "version": "1.0.0",
+  "description": "Figma variables and styles to CSS variables, Tailwind v3/v4, SCSS and JS. Serve them live so your website updates when the design changes, with no redeploy.",
+  "type": "module",
+  "bin": {
+    "figma-live-tokens": "bin/cli.js"
+  },
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./server": "./src/server.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "figma",
+    "design-tokens",
+    "figma-variables",
+    "css-variables",
+    "tailwind",
+    "tailwindcss",
+    "dtcg",
+    "tokens-studio",
+    "style-dictionary",
+    "live-reload",
+    "theming",
+    "dark-mode",
+    "design-system"
+  ],
+  "author": "Tirth Parikh (https://tirthparikh.com)",
+  "homepage": "https://tirthparikh.com/tools/figma-live-tokens/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tirthkparikh/figma-live-tokens.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tirthkparikh/figma-live-tokens/issues"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

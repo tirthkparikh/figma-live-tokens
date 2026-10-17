@@ -1,0 +1,178 @@
+// Pull tokens from a Figma file.
+// 1) Variables (REST API, needs a plan with Variables API access).
+// 2) Fallback: published styles (colours, text styles, shadows), which work on every plan.
+
+const API = () => process.env.FIGMA_API_URL || 'https://api.figma.com';
+
+async function get(path, token) {
+  const res = await fetch(API() + path, { headers: { 'X-Figma-Token': token } });
+  const body = await res.text();
+  let data;
+  try { data = JSON.parse(body); } catch { data = { message: body }; }
+  if (!res.ok) {
+    const err = new Error(`Figma API ${res.status}: ${data.message || data.err || res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+const hex2 = n => Math.round(Math.max(0, Math.min(1, n)) * 255).toString(16).padStart(2, '0');
+export function rgbaToHex({ r, g, b, a = 1 }, opacity = 1) {
+  const alpha = a * opacity;
+  return `#${hex2(r)}${hex2(g)}${hex2(b)}${alpha < 1 ? hex2(alpha) : ''}`;
+}
+
+// "Colors / Brand / 500" -> ["colors", "brand", "500"]
+export const splitName = name => name.split('/').map(s => s.trim()).filter(Boolean);
+
+function setPath(tree, path, token) {
+  let node = tree;
+  for (const seg of path.slice(0, -1)) {
+    if (node[seg] && '$value' in node[seg]) node[seg] = { DEFAULT: node[seg] };  // token and group share a name
+    node = node[seg] ??= {};
+  }
+  const leaf = path.at(-1);
+  if (node[leaf] && !('$value' in node[leaf])) node[leaf].DEFAULT = token;
+  else node[leaf] = token;
+}
+
+const DIMENSION_SCOPES = new Set(['CORNER_RADIUS', 'WIDTH_HEIGHT', 'GAP', 'FONT_SIZE', 'STROKE_FLOAT', 'EFFECT_FLOAT', 'PARAGRAPH_SPACING', 'PARAGRAPH_INDENT', 'LETTER_SPACING']);
+
+function floatType(v) {
+  const scopes = v.scopes ?? [];
+  if (scopes.includes('FONT_WEIGHT')) return 'fontWeight';
+  if (scopes.includes('OPACITY')) return 'number';
+  if (scopes.includes('LINE_HEIGHT')) return 'dimension';
+  if (scopes.some(s => DIMENSION_SCOPES.has(s))) return 'dimension';
+  if (/radius|spacing|space|size|gap|padding|margin|width|height|border|stroke|font-?size|breakpoint/i.test(v.name)) return 'dimension';
+  if (/weight/i.test(v.name)) return 'fontWeight';
+  return 'number';
+}
+
+/** Convert the Variables API response into { default: tree, modes: { modeName: tree } }. */
+export function variablesToTokens(meta) {
+  const collections = meta.variableCollections ?? {};
+  const variables = meta.variables ?? {};
+  const byId = new Map(Object.entries(variables));
+  const refName = id => {
+    const v = byId.get(id);
+    return v ? `{${splitName(v.name).join('.')}}` : null;
+  };
+  const modeNames = new Set();
+  for (const c of Object.values(collections)) for (const m of c.modes ?? []) if (m.modeId !== c.defaultModeId) modeNames.add(m.name);
+
+  const trees = { default: {} };
+  for (const name of modeNames) trees[name] = {};
+
+  for (const v of Object.values(variables)) {
+    if (v.remote && !collections[v.variableCollectionId]) continue;
+    if (v.hiddenFromPublishing) continue;
+    const col = collections[v.variableCollectionId];
+    if (!col) continue;
+    const path = splitName(v.name);
+    const type = v.resolvedType === 'COLOR' ? 'color' : v.resolvedType === 'FLOAT' ? floatType(v) : v.resolvedType === 'BOOLEAN' ? 'boolean' : 'string';
+    const convert = raw => {
+      if (raw && raw.type === 'VARIABLE_ALIAS') return refName(raw.id) ?? null;
+      if (type === 'color') return rgbaToHex(raw);
+      if (type === 'dimension') return `${Math.round(raw * 1000) / 1000}px`;
+      if (type === 'string' && /font|family/i.test(v.name)) return raw;
+      return raw;
+    };
+    const tokenFor = modeId => {
+      const value = convert(v.valuesByMode?.[modeId]);
+      if (value == null) return null;
+      const t = { $type: type === 'string' && /famil/i.test(v.name) ? 'fontFamily' : type, $value: value };
+      if (v.description) t.$description = v.description;
+      return t;
+    };
+    const def = tokenFor(col.defaultModeId);
+    if (!def) continue;
+    setPath(trees.default, path, def);
+    for (const mode of col.modes ?? []) {
+      if (mode.modeId === col.defaultModeId) continue;
+      const t = tokenFor(mode.modeId);
+      if (t) setPath(trees[mode.name], path, t);
+    }
+  }
+  return trees;
+}
+
+/** Convert published styles + their nodes into a token tree. */
+export function stylesToTokens(styles, nodes) {
+  const tree = {};
+  for (const s of styles) {
+    const doc = nodes[s.node_id]?.document;
+    if (!doc) continue;
+    const path = splitName(s.name);
+    if (s.style_type === 'FILL') {
+      const fill = (doc.fills ?? []).find(f => f.visible !== false);
+      if (!fill) continue;
+      if (fill.type === 'SOLID') setPath(tree, path, { $type: 'color', $value: rgbaToHex(fill.color, fill.opacity ?? 1) });
+      else if (fill.type?.startsWith('GRADIENT_') && fill.gradientStops) {
+        setPath(tree, path, { $type: 'gradient', $value: fill.gradientStops.map(st => ({ color: rgbaToHex(st.color), position: Math.round(st.position * 1000) / 1000 })) });
+      }
+    } else if (s.style_type === 'TEXT' && doc.style) {
+      const st = doc.style;
+      const value = { fontFamily: st.fontFamily, fontWeight: st.fontWeight, fontSize: `${st.fontSize}px` };
+      if (st.lineHeightPx && st.lineHeightUnit !== 'INTRINSIC_%') value.lineHeight = st.lineHeightUnit === 'FONT_SIZE_%' && st.lineHeightPercentFontSize ? Math.round(st.lineHeightPercentFontSize) / 100 : `${Math.round(st.lineHeightPx * 100) / 100}px`;
+      if (st.letterSpacing) value.letterSpacing = `${Math.round(st.letterSpacing * 100) / 100}px`;
+      if (st.textCase && st.textCase !== 'ORIGINAL') value.textCase = { UPPER: 'uppercase', LOWER: 'lowercase', TITLE: 'capitalize' }[st.textCase] ?? 'none';
+      setPath(tree, path, { $type: 'typography', $value: value });
+    } else if (s.style_type === 'EFFECT') {
+      const shadows = (doc.effects ?? []).filter(e => e.visible !== false && /SHADOW/.test(e.type)).map(e => ({
+        offsetX: `${e.offset?.x ?? 0}px`, offsetY: `${e.offset?.y ?? 0}px`, blur: `${e.radius ?? 0}px`, spread: `${e.spread ?? 0}px`,
+        color: rgbaToHex(e.color ?? { r: 0, g: 0, b: 0, a: 0.25 }), inset: e.type === 'INNER_SHADOW',
+      }));
+      if (shadows.length) setPath(tree, path, { $type: 'shadow', $value: shadows.length === 1 ? shadows[0] : shadows });
+    }
+  }
+  return tree;
+}
+
+/**
+ * Pull a file. Returns { source: 'variables' | 'styles', default: tree, modes: { name: tree } }.
+ * `prefer`: 'auto' (variables, then styles), 'variables', 'styles' or 'both' (styles merged under variables).
+ */
+export async function pull({ file, token, prefer = 'auto' }) {
+  if (!file) throw new Error('Missing Figma file key (the part after /design/ or /file/ in the URL).');
+  if (!token) throw new Error('Missing Figma token. Set FIGMA_TOKEN or pass --token.');
+  file = parseFileKey(file);
+  let vars = null, varErr = null;
+  if (prefer !== 'styles') {
+    try {
+      const data = await get(`/v1/files/${file}/variables/local`, token);
+      vars = variablesToTokens(data.meta ?? {});
+      if (!Object.keys(vars.default).length) vars = null;
+    } catch (e) {
+      if (prefer === 'variables' || (e.status !== 403 && e.status !== 404)) throw e;
+      varErr = e;
+    }
+  }
+  let styleTree = null;
+  if (prefer === 'styles' || prefer === 'both' || !vars) {
+    const { meta } = await get(`/v1/files/${file}/styles`, token);
+    const styles = meta?.styles ?? [];
+    if (styles.length) {
+      const nodes = {};
+      const ids = styles.map(s => s.node_id);
+      for (let i = 0; i < ids.length; i += 200) {
+        const part = await get(`/v1/files/${file}/nodes?ids=${encodeURIComponent(ids.slice(i, i + 200).join(','))}`, token);
+        Object.assign(nodes, part.nodes);
+      }
+      styleTree = stylesToTokens(styles, nodes);
+    }
+  }
+  if (!vars && !styleTree) {
+    throw new Error(`No variables or published styles found in file ${file}${varErr ? ` (variables: ${varErr.message})` : ''}.`);
+  }
+  const { default: def = {}, ...modes } = vars ?? {};
+  const merged = styleTree ? { ...styleTree, ...def } : def;
+  return { source: vars && styleTree ? 'variables+styles' : vars ? 'variables' : 'styles', default: merged, modes };
+}
+
+/** Accept a bare key or a full Figma URL. */
+export function parseFileKey(input) {
+  const m = String(input).match(/figma\.com\/(?:file|design|proto)\/([A-Za-z0-9]+)/);
+  return m ? m[1] : String(input).trim();
+}
