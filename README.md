@@ -1,5 +1,7 @@
 # figma-live-tokens
 
+[![npm](https://img.shields.io/npm/v/@tirthlabs/figma-live-tokens?color=c2410c)](https://www.npmjs.com/package/@tirthlabs/figma-live-tokens) [![CI](https://github.com/tirthkparikh/figma-live-tokens/actions/workflows/ci.yml/badge.svg)](https://github.com/tirthkparikh/figma-live-tokens/actions/workflows/ci.yml) [![license](https://img.shields.io/npm/l/@tirthlabs/figma-live-tokens)](LICENSE) · [Live demo](https://tirthparikh.com/tools/figma-live-tokens/)
+
 Turn Figma variables and styles into CSS variables, Tailwind (v3 and v4), SCSS and JS, and **keep your live website in sync with Figma without a redeploy.**
 
 A designer changes a colour in Figma, publishes, and every open page picks up the new value within seconds.
