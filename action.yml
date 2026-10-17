@@ -1,0 +1,157 @@
+name: Figma Live Tokens
+description: Pull design tokens from Figma (or build Tokens Studio / DTCG JSON) into CSS, Tailwind, SCSS and JS, and open a pull request when they change.
+author: Tirth Parikh
+branding:
+  icon: droplet
+  color: orange
+
+inputs:
+  figma-file:
+    description: Figma file URL or key. Leave empty to only build the JSON already in the repo (e.g. pushed by Tokens Studio).
+    required: false
+    default: ''
+  figma-token:
+    description: Figma personal access token (store it as a repository secret).
+    required: false
+    default: ''
+  prefer:
+    description: "Where to read tokens from: auto (variables, then styles), variables, styles or both."
+    required: false
+    default: auto
+  input:
+    description: Token JSON file (written by the Figma pull, or maintained by Tokens Studio).
+    required: false
+    default: tokens/tokens.json
+  formats:
+    description: Comma-separated output formats (css, tailwind4, tailwind, scss, js, json).
+    required: false
+    default: css,tailwind4,js
+  out:
+    description: Output folder for the generated files.
+    required: false
+    default: tokens/dist
+  args:
+    description: Extra arguments for the build command, e.g. "--prefix ds --theme dark=tokens/tokens.dark.json".
+    required: false
+    default: ''
+  pull-request:
+    description: Open (or update) a pull request when the tokens change. Set to false to only build, e.g. to commit yourself or deploy.
+    required: false
+    default: 'true'
+  branch:
+    description: Branch used for the pull request.
+    required: false
+    default: design-tokens/update
+  github-token:
+    description: Token that can push a branch and open pull requests.
+    required: false
+    default: ${{ github.token }}
+  version:
+    description: Version of @tirthlabs/figma-live-tokens to run.
+    required: false
+    default: '1'
+
+outputs:
+  changed:
+    description: '"true" when the token files changed.'
+    value: ${{ steps.diff.outputs.changed }}
+  pull-request-url:
+    description: URL of the opened or updated pull request.
+    value: ${{ steps.pr.outputs.url }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Pull tokens from Figma
+      if: inputs.figma-file != ''
+      shell: bash
+      env:
+        FIGMA_TOKEN: ${{ inputs.figma-token }}
+        FLT_FILE: ${{ inputs.figma-file }}
+        FLT_INPUT: ${{ inputs.input }}
+        FLT_PREFER: ${{ inputs.prefer }}
+        FLT_VERSION: ${{ inputs.version }}
+      run: |
+        if [ -z "$FIGMA_TOKEN" ]; then echo "::error::figma-token is empty. Add a FIGMA_TOKEN repository secret and pass it as figma-token."; exit 1; fi
+        mkdir -p "$(dirname "$FLT_INPUT")"
+        npx -y "@tirthlabs/figma-live-tokens@$FLT_VERSION" pull --figma "$FLT_FILE" --prefer "$FLT_PREFER" --out "$FLT_INPUT"
+
+    - name: Build CSS, Tailwind and JS
+      shell: bash
+      env:
+        FLT_INPUT: ${{ inputs.input }}
+        FLT_FORMATS: ${{ inputs.formats }}
+        FLT_OUT: ${{ inputs.out }}
+        FLT_ARGS: ${{ inputs.args }}
+        FLT_VERSION: ${{ inputs.version }}
+      run: |
+        # FLT_ARGS is split on spaces on purpose (it holds flags)
+        # shellcheck disable=SC2086
+        npx -y "@tirthlabs/figma-live-tokens@$FLT_VERSION" build "$FLT_INPUT" --formats "$FLT_FORMATS" --out "$FLT_OUT" $FLT_ARGS
+
+    - name: Detect changes
+      id: diff
+      shell: bash
+      env:
+        FLT_INPUT: ${{ inputs.input }}
+        FLT_OUT: ${{ inputs.out }}
+      run: |
+        git add -A -- "$(dirname "$FLT_INPUT")" "$FLT_OUT"
+        if git diff --cached --quiet; then
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+          echo "Design tokens are up to date." >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          # A readable list of changed CSS variables for the PR and the job summary
+          {
+            echo "### Design tokens changed"
+            echo
+            echo '| Variable | Before | After |'
+            echo '| --- | --- | --- |'
+            git diff --cached -U0 -- "$FLT_OUT/tokens.css" | node -e '
+              const lines = require("fs").readFileSync(0, "utf8").split("\n");
+              const before = {}, after = {};
+              for (const l of lines) {
+                const m = l.match(/^([-+])\s*(--[\w-]+):\s*(.*?);?$/);
+                if (m) (m[1] === "-" ? before : after)[m[2]] = m[3];
+              }
+              const names = [...new Set([...Object.keys(before), ...Object.keys(after)])];
+              for (const n of names.slice(0, 200)) console.log(`| \`${n}\` | ${before[n] ?? "(new)"} | ${after[n] ?? "(removed)"} |`);
+              if (names.length > 200) console.log(`| … | ${names.length - 200} more | |`);
+              if (!names.length) console.log("| (other generated files) | | |");
+            '
+          } > "$RUNNER_TEMP/tokens-diff.md"
+          cat "$RUNNER_TEMP/tokens-diff.md" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Open or update pull request
+      id: pr
+      if: steps.diff.outputs.changed == 'true' && inputs.pull-request == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        FLT_BRANCH: ${{ inputs.branch }}
+        FLT_FILE: ${{ inputs.figma-file }}
+      run: |
+        base="${GITHUB_BASE_REF:-$GITHUB_REF_NAME}"
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git checkout -B "$FLT_BRANCH"
+        git commit -q -m "Update design tokens${FLT_FILE:+ from Figma}"
+        git push -q -f origin "$FLT_BRANCH"
+        {
+          echo "Generated by [figma-live-tokens](https://github.com/tirthkparikh/figma-live-tokens)${FLT_FILE:+ from Figma}."
+          echo
+          cat "$RUNNER_TEMP/tokens-diff.md"
+        } > "$RUNNER_TEMP/pr-body.md"
+        if url=$(gh pr view "$FLT_BRANCH" --json url,state -q 'select(.state=="OPEN") | .url' 2>/dev/null) && [ -n "$url" ]; then
+          gh pr edit "$FLT_BRANCH" --body-file "$RUNNER_TEMP/pr-body.md" >/dev/null
+        else
+          url=$(gh pr create --base "$base" --head "$FLT_BRANCH" --title "Design tokens updated${FLT_FILE:+ from Figma}" --body-file "$RUNNER_TEMP/pr-body.md")
+        fi
+        echo "url=$url" >> "$GITHUB_OUTPUT"
+        echo "Pull request: $url" >> "$GITHUB_STEP_SUMMARY"

@@ -73,6 +73,62 @@ Tip: ship the built `tokens.css` with your site too, for the first paint and as 
 
 > **Protect the live server.** `/webhook` and `/refresh` are open unless you set `--webhook-passcode` and `--refresh-token`. Token values that could break out of a CSS declaration (`;`, `{`, `}`, comments) are rejected, so a bad value in Figma can't inject CSS into your pages.
 
+## GitHub Action: Figma → pull request
+
+Keep design tokens in the repo and let a workflow open a pull request whenever the design changes. The PR lists every CSS variable that changed, before and after.
+
+```yaml
+# .github/workflows/design-tokens.yml
+name: Design tokens
+on:
+  schedule: [{ cron: '0 6 * * 1' }]   # every Monday; Figma limits API reads, so don't poll too often
+  workflow_dispatch:                   # plus a "Run workflow" button
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: tirthkparikh/figma-live-tokens@v1
+        with:
+          figma-file: https://www.figma.com/design/AbC123/Website
+          figma-token: ${{ secrets.FIGMA_TOKEN }}
+          formats: css,tailwind4,js
+```
+
+**Using Tokens Studio instead?** Let the plugin push its JSON to the repo and build on every push. Leave `figma-file` empty:
+
+```yaml
+on:
+  push:
+    paths: ['tokens/**.json']
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: { contents: write, pull-requests: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: tirthkparikh/figma-live-tokens@v1
+        with:
+          input: tokens/tokens.json
+          args: --sets core,light --theme dark=sets:core,dark
+```
+
+| Input | Default | |
+| --- | --- | --- |
+| `figma-file` | | Figma URL or key. Empty: only build the JSON in the repo |
+| `figma-token` | | Figma personal access token (repository secret) |
+| `input` | `tokens/tokens.json` | Token JSON file |
+| `formats` | `css,tailwind4,js` | Output formats |
+| `out` | `tokens/dist` | Output folder |
+| `args` | | Extra build flags (`--prefix`, `--theme`, `--sets`…) |
+| `pull-request` | `true` | Open or update a PR on change. `false` to only build |
+| `branch` | `design-tokens/update` | PR branch |
+
+Outputs: `changed` and `pull-request-url`. To let the built-in token open PRs, enable **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**, or pass a personal token as `github-token`.
+
 ## Tailwind
 
 **v4**: import the generated theme after Tailwind:
