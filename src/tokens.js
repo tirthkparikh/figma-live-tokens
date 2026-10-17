@@ -139,7 +139,10 @@ function evalArithmetic(src) {
   return v;
 }
 
-const px = v => (typeof v === 'number' ? (v === 0 ? '0' : `${v}px`) : String(v));
+// Tokens Studio stores numbers as strings ("4"), so treat numeric strings as numbers too.
+const NUM_RE = /^-?(\d+\.?\d*|\.\d+)$/;
+const isNum = v => typeof v === 'number' || (typeof v === 'string' && NUM_RE.test(v.trim()));
+const px = v => (isNum(v) ? (Number(v) === 0 ? '0' : `${Number(v)}px`) : String(v));
 const dim = v => (isObj(v) && 'value' in v && 'unit' in v ? `${v.value}${v.unit}` : px(v));
 const quoteFont = f => (/^[\w-]+$/.test(f) && !/\d/.test(f[0]) ? f : `"${f.replace(/"/g, '')}"`);
 const GENERIC_FONTS = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-sans-serif', 'ui-serif', 'ui-monospace']);
@@ -182,6 +185,15 @@ export function fontFamily(v) {
  * return an object of sub-properties; everything else returns a string.
  */
 export function cssValue(tok) {
+  const out = rawCssValue(tok);
+  const check = s => {
+    if (/[;{}]|<\/|\/\*|\*\//.test(s)) throw new Error(`Token "${tok.path?.join('.') ?? '?'}" has an unsafe CSS value: ${JSON.stringify(s).slice(0, 80)}`);
+  };
+  if (isObj(out)) Object.values(out).forEach(check); else check(out);
+  return out;
+}
+
+function rawCssValue(tok) {
   const type = TYPE_ALIASES[tok.type] ?? tok.type;
   const v = tok.value;
   switch (type) {
@@ -200,19 +212,19 @@ export function cssValue(tok) {
       if (v.fontFamily != null) out['font-family'] = fontFamily(v.fontFamily);
       if (v.fontWeight != null) out['font-weight'] = String(fontWeight(v.fontWeight));
       if (v.fontSize != null) out['font-size'] = dim(v.fontSize);
-      if (v.lineHeight != null) out['line-height'] = typeof v.lineHeight === 'number' && v.lineHeight > 4 ? px(v.lineHeight) : String(v.lineHeight);
+      if (v.lineHeight != null) out['line-height'] = isNum(v.lineHeight) && Number(v.lineHeight) > 4 ? px(v.lineHeight) : String(v.lineHeight);
       if (v.letterSpacing != null) out['letter-spacing'] = dim(v.letterSpacing);
       if (v.textCase != null && v.textCase !== 'none') out['text-transform'] = v.textCase;
       if (v.textDecoration != null && v.textDecoration !== 'none') out['text-decoration'] = v.textDecoration;
       return out;
     }
     case 'transition':
-      return isObj(v) ? `${cssValue({ type: 'duration', value: v.duration })} ${cssValue({ type: 'cubicBezier', value: v.timingFunction })} ${cssValue({ type: 'duration', value: v.delay ?? 0 })}` : String(v);
+      return isObj(v) ? `${rawCssValue({ type: 'duration', value: v.duration })} ${rawCssValue({ type: 'cubicBezier', value: v.timingFunction })} ${rawCssValue({ type: 'duration', value: v.delay ?? 0 })}` : String(v);
     case 'gradient':
       if (Array.isArray(v)) return `linear-gradient(90deg, ${v.map(s => `${color(s.color)} ${Math.round(s.position * 100)}%`).join(', ')})`;
       return String(v);
     case 'lineHeight':
-      return typeof v === 'number' && v > 4 ? px(v) : String(v);
+      return isNum(v) && Number(v) > 4 ? px(v) : String(v);
     default:
       if (Array.isArray(v)) return v.join(', ');
       if (isObj(v)) return JSON.stringify(v);
@@ -224,5 +236,6 @@ export const normalType = t => TYPE_ALIASES[t] ?? t;
 
 /** Full pipeline: JSON document -> resolved token map. */
 export function load(doc, { sets } = {}) {
+  if (!isObj(doc)) throw new Error('The token file must contain a JSON object of token groups.');
   return resolve(flatten(selectSets(doc, sets)));
 }

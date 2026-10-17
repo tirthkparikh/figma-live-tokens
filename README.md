@@ -71,6 +71,8 @@ The page fires `tokens:update` on `document` after each change, in case your JS 
 
 Tip: ship the built `tokens.css` with your site too, for the first paint and as an offline fallback. The live script overrides it when it connects.
 
+> **Protect the live server.** `/webhook` and `/refresh` are open unless you set `--webhook-passcode` and `--refresh-token`. Token values that could break out of a CSS declaration (`;`, `{`, `}`, comments) are rejected, so a bad value in Figma can't inject CSS into your pages.
+
 ## Tailwind
 
 **v4**: import the generated theme after Tailwind:
@@ -102,6 +104,14 @@ npx figma-live-tokens build tokens.json --theme dark=tokens.dark.json --theme br
 npx figma-live-tokens build tokens.json --sets core,light --theme dark=sets:core,dark
 ```
 
+## Pull from Figma into a file
+
+```bash
+FIGMA_TOKEN=figd_... npx figma-live-tokens pull --figma <file-url> --out tokens.json
+```
+
+This writes `tokens.json` (overwriting it) plus one `tokens.<mode>.json` per extra variable mode, such as `tokens.dark.json`. Commit them and build from them like any other token file.
+
 ## Config file
 
 `figma-live-tokens.config.json` (command-line flags win):
@@ -118,6 +128,8 @@ npx figma-live-tokens build tokens.json --sets core,light --theme dark=sets:core
   "darkMedia": true
 }
 ```
+
+Other keys: `input`, `themes` (`{ "dark": "tokens.dark.json" }`), `sets`, `prefer`, `refs`, `classes`, `port`, `host`, `cors`, `webhookPasscode` (or `FIGMA_WEBHOOK_PASSCODE`) and `refreshToken`.
 
 `selector` is where base variables go, `themeSelector` is the selector for each theme (`{name}` is replaced), and `darkMedia: false` turns off the automatic `prefers-color-scheme` block for the `dark` theme.
 

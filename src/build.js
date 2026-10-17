@@ -54,6 +54,7 @@ export async function loadSource(opts) {
 /** Resolve + render. Returns { files, count, hash }. */
 export function buildFiles(src, opts = {}) {
   const tokens = load(src.base);
+  if (!tokens.size) throw new Error('No tokens found. Check the file has token groups with $value (DTCG) or value (Tokens Studio).');
   const themes = {};
   for (const [name, tree] of Object.entries(src.themes)) themes[name] = load(tree);
   const files = render(tokens, { ...opts, themes });

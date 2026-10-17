@@ -5,7 +5,7 @@ const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 export const kebab = s => String(s)
   .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-  .replace(/[^a-zA-Z0-9_-]+/g, '-')
+  .replace(/[^\p{L}\p{N}_-]+/gu, '-')
   .replace(/^-+|-+$/g, '')
   .toLowerCase();
 
@@ -180,7 +180,19 @@ export function tailwind4(tokens, { prefix } = {}) {
 export const FORMATS = ['css', 'scss', 'js', 'json', 'tailwind', 'tailwind4'];
 
 /** Build every requested format. Returns { filename: contents }. */
+// Two tokens that map to the same CSS variable would silently overwrite each other.
+function checkNames(tokens, prefix) {
+  const seen = new Map();
+  for (const [key, tok] of tokens) {
+    if (tok.path.some(p => !kebab(p))) throw new Error(`Token "${key}" has a name part with no letters or digits, so it can't become a CSS variable.`);
+    const name = varName(tok.path, prefix);
+    if (seen.has(name)) throw new Error(`Tokens "${seen.get(name)}" and "${key}" both become ${name}. Rename one of them.`);
+    seen.set(name, key);
+  }
+}
+
 export function render(tokens, { formats = ['css'], themes = {}, ...opts } = {}) {
+  checkNames(tokens, opts.prefix);
   const files = {};
   for (const f of formats) {
     switch (f) {

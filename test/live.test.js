@@ -127,7 +127,7 @@ test('pull uses variables (and modes) when available; webhook triggers a refresh
   try {
     const css = await (await fetch(`${base}/tokens.css`)).text();
     assert.match(css, /--bg: #ffffff;/);
-    assert.match(css, /\[data-theme="dark"\] \{\n  --bg: #000000;/);
+    assert.match(css, /\[data-theme="dark"\] \{\n {2}--bg: #000000;/);
 
     const bad = await fetch(`${base}/webhook`, { method: 'POST', body: JSON.stringify({ passcode: 'wrong', event_type: 'FILE_UPDATE' }) });
     assert.equal(bad.status, 401);

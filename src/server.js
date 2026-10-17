@@ -15,17 +15,18 @@ const CLIENT = `(() => {
     style.id = 'figma-live-tokens';
     document.head.appendChild(style);
   }
-  let version = 0;
-  const apply = (css, v) => {
-    if (v && v <= version) return;
-    version = v || version;
+  // Compare content hashes, not versions: a restarted server starts counting from 1 again.
+  let hash = null, version = 0;
+  const apply = (css, v, h) => {
+    if (h && h === hash) return;
+    hash = h || hash; version = v || version;
     style.textContent = css;
-    document.dispatchEvent(new CustomEvent('tokens:update', { detail: { version } }));
+    document.dispatchEvent(new CustomEvent('tokens:update', { detail: { version, hash } }));
   };
   fetch(base + 'tokens.css', { cache: 'no-store' }).then(r => r.ok && r.text()).then(css => css && apply(css)).catch(() => {});
   if (!('EventSource' in window)) return;
   const es = new EventSource(base + 'events');
-  es.addEventListener('tokens', e => { const d = JSON.parse(e.data); apply(d.css, d.version); });
+  es.addEventListener('tokens', e => { const d = JSON.parse(e.data); apply(d.css, d.version, d.hash); });
 })();
 `;
 
@@ -95,7 +96,7 @@ export function createLiveServer(opts = {}) {
 
   const readBody = req => new Promise((ok, fail) => {
     let size = 0; const chunks = [];
-    req.on('data', c => { size += c.length; if (size > 1e6) { fail(new Error('too large')); req.destroy(); } else chunks.push(c); });
+    req.on('data', c => { size += c.length; if (size > 1e6) { req.pause(); fail(Object.assign(new Error('Body too large.'), { status: 413 })); } else chunks.push(c); });
     req.on('end', () => ok(Buffer.concat(chunks).toString()));
     req.on('error', fail);
   });
@@ -119,21 +120,21 @@ export function createLiveServer(opts = {}) {
     }
     if (req.method === 'GET' && path === '/client.js') return send(res, 200, CLIENT, TYPES.js);
     if (req.method === 'GET' && (path === '/' || path === '/status')) {
-      return send(res, 200, { ok: !state.error, version: state.version, hash: state.hash, tokens: state.count, updatedAt: state.updatedAt, source: state.source, error: state.error, clients: clients.size, files: Object.keys(state.files) });
+      return send(res, 200, { ok: !state.error, version: state.version, hash: state.hash, tokens: state.count, updatedAt: state.updatedAt, error: state.error, clients: clients.size, files: Object.keys(state.files) });
     }
-    if (req.method === 'GET' && path === '/tokens.json') {
+    const file = path === '/tokens.json' ? 'tokens.flat.json' : path.slice(1);
+    if ((req.method === 'GET' || req.method === 'HEAD') && (Object.hasOwn(state.files, file) || (!state.hash && /\.(css|json|js|cjs|ts|scss)$/.test(file)))) {
       if (!state.hash) return send(res, 503, { error: state.error ?? 'Tokens not loaded yet.' });
-      return send(res, 200, state.files['tokens.flat.json'], TYPES.json);
-    }
-    if (req.method === 'GET' && state.files[path.slice(1)] != null) {
       const etag = `"${state.hash}"`;
       if (req.headers['if-none-match'] === etag) { res.writeHead(304); return res.end(); }
       res.setHeader('ETag', etag);
-      return send(res, 200, state.files[path.slice(1)], TYPES[path.split('.').pop()] ?? 'text/plain');
+      if (req.method === 'HEAD') { res.writeHead(200, { 'Content-Type': TYPES[file.split('.').pop()] ?? 'text/plain' }); return res.end(); }
+      return send(res, 200, state.files[file], TYPES[file.split('.').pop()] ?? 'text/plain');
     }
     if (req.method === 'POST' && path === '/webhook') {
       let payload = {};
-      try { payload = JSON.parse((await readBody(req)) || '{}'); } catch { return send(res, 400, { error: 'Invalid JSON.' }); }
+      try { payload = JSON.parse((await readBody(req)) || '{}'); } catch (e) { return send(res, e.status ?? 400, { error: e.status ? e.message : 'Invalid JSON.' }); }
+      if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return send(res, 400, { error: 'Expected a JSON object.' });
       if (opts.webhookPasscode && !safeEqual(payload.passcode ?? '', opts.webhookPasscode)) return send(res, 401, { error: 'Bad passcode.' });
       if (payload.event_type === 'PING') return send(res, 200, { ok: true });
       soon(`webhook ${payload.event_type ?? ''}`.trim());
@@ -147,7 +148,7 @@ export function createLiveServer(opts = {}) {
     send(res, 404, { error: 'Not found.' });
   }
 
-  const server = http.createServer((req, res) => handler(req, res).catch(e => send(res, 500, { error: e.message })));
+  const server = http.createServer((req, res) => handler(req, res).catch(e => send(res, e.status ?? 500, { error: e.status ? e.message : 'Internal error.' })));
 
   return {
     server, handler, state, refresh,

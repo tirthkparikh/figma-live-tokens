@@ -50,7 +50,7 @@ test('CSS output: refs as var(), themes only write changed values, dark media qu
   const dark = load({ c: { $type: 'color', white: { $value: '#fff' }, black: { $value: '#000' }, bg: { $value: '{c.black}' } } });
   const out = css(base, { themes: { dark }, prefix: 'ds' });
   assert.match(out, /--ds-c-bg: var\(--ds-c-white\);/);
-  assert.match(out, /\[data-theme="dark"\] \{\n  --ds-c-bg: var\(--ds-c-black\);\n\}/);
+  assert.match(out, /\[data-theme="dark"\] \{\n {2}--ds-c-bg: var\(--ds-c-black\);\n\}/);
   assert.match(out, /@media \(prefers-color-scheme: dark\)/);
   assert.equal(out.match(/--ds-c-white/g).length, 2);  // declared once, referenced once
   assert.match(css(base, { refs: false }), /--c-bg: #fff;/);
@@ -58,7 +58,7 @@ test('CSS output: refs as var(), themes only write changed values, dark media qu
 
 test('typography utility classes and SCSS maps', () => {
   const t = load({ typography: { body: { $type: 'typography', $value: { fontFamily: ['Inter', 'sans-serif'], fontSize: '16px' } } } });
-  assert.match(css(t), /\.typo-body \{\n  font-family: var\(--typography-body-font-family\);/);
+  assert.match(css(t), /\.typo-body \{\n {2}font-family: var\(--typography-body-font-family\);/);
   assert.match(scss(t), /"font-family": \(Inter, sans-serif\),/);
 });
 
@@ -76,7 +76,7 @@ test('Tailwind v3 preset and v4 @theme', () => {
   assert.match(v4, /--radius-lg: var\(--ds-radius-lg\);/);
   assert.match(v4, /--font-body: var\(--ds-font-body\);/);
   // without a prefix the names match, so values are written directly (no self-reference)
-  assert.match(tailwind4(load({ color: { x: { $type: 'color', $value: '#123456' } } })), /@theme \{\n  --color-x: #123456;/);
+  assert.match(tailwind4(load({ color: { x: { $type: 'color', $value: '#123456' } } })), /@theme \{\n {2}--color-x: #123456;/);
 });
 
 test('flat JSON', () => {
@@ -136,6 +136,6 @@ test('custom selectors and no dark media query', () => {
   const dark = load({ c: { $type: 'color', $value: '#000' } });
   const out = css(base, { themes: { dark }, selector: '.preview', themeSelector: '.preview[data-mode="{name}"]', darkMedia: false });
   assert.match(out, /^\.preview \{/m);
-  assert.match(out, /\.preview\[data-mode="dark"\] \{\n  --c: #000;/);
+  assert.match(out, /\.preview\[data-mode="dark"\] \{\n {2}--c: #000;/);
   assert.doesNotMatch(out, /prefers-color-scheme/);
 });

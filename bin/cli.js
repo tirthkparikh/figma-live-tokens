@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { readFile, writeFile, access } from 'node:fs/promises';
+import { readFile, writeFile, access, stat } from 'node:fs/promises';
 import { watchFile } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +29,7 @@ Source (pick one)
                              (repeatable; Figma modes become themes automatically)
 
 Output
-  --out <dir>                Output folder                          (default: tokens)
+  --out <dir>                Output folder (build); output file (pull) (default: tokens)
   --formats <list>           ${FORMATS.join(',')}  (default: css)
   --prefix <name>            Prefix for variable names, e.g. ds -> --ds-color-brand
   --no-refs                  Write final values instead of var(--other-token)
@@ -148,7 +148,8 @@ try {
     const cfg = await config();
     if (!cfg.figma) fail('pull needs --figma <file key or URL>.');
     const res = await pull({ file: cfg.figma, token: cfg.token, prefer: cfg.prefer });
-    const out = flags.out ?? 'tokens.json';
+    let out = flags.out ?? 'tokens.json';
+    if (out.endsWith('/') || (await stat(out).catch(() => null))?.isDirectory()) out = join(out, 'tokens.json');
     await writeFile(out, JSON.stringify(res.default, null, 2) + '\n');
     ok(`saved ${out} (from Figma ${res.source})`);
     for (const [mode, tree] of Object.entries(res.modes)) {
@@ -160,11 +161,11 @@ try {
     const cfg = await config();
     const live = createLiveServer({ ...cfg, formats: cfg.formats, log: m => console.log(`  ${new Date().toLocaleTimeString()}  ${m}`) });
     const addr = await live.start(cfg.port, cfg.host);
-    if (live.state.error && !live.state.hash) console.error(`\x1b[33m!\x1b[0m first load failed: ${live.state.error} (will keep retrying)`);
+    if (live.state.error && !live.state.hash) console.error(`\x1b[33m!\x1b[0m first load failed: ${live.state.error} ${cfg.figma && cfg.interval ? '(will keep retrying)' : '(fix it and save again)'}`);
     const url = `http://${addr.address === '0.0.0.0' || addr.address === '::' ? 'localhost' : addr.address}:${addr.port}`;
     ok(`live token server on ${url}`);
     console.log(`  CSS:     ${url}/tokens.css\n  Script:  <script src="${url}/client.js" defer></script>`);
-    if (cfg.figma) console.log(`  Figma:   polling every ${cfg.interval}s${cfg.webhookPasscode ? `, webhook at ${url}/webhook` : ''}`);
+    if (cfg.figma) console.log(`  Figma:   ${cfg.interval ? `polling every ${Math.max(10, cfg.interval)}s` : 'polling off'}${cfg.webhookPasscode ? `, webhook at ${url}/webhook` : ''}`);
     const stop = () => live.stop().then(() => process.exit(0));
     process.on('SIGINT', stop); process.on('SIGTERM', stop);
   } else {

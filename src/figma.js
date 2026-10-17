@@ -5,7 +5,7 @@
 const API = () => process.env.FIGMA_API_URL || 'https://api.figma.com';
 
 async function get(path, token) {
-  const res = await fetch(API() + path, { headers: { 'X-Figma-Token': token } });
+  const res = await fetch(API() + path, { headers: { 'X-Figma-Token': token }, signal: AbortSignal.timeout(30000) });
   const body = await res.text();
   let data;
   try { data = JSON.parse(body); } catch { data = { message: body }; }
@@ -134,6 +134,16 @@ export function stylesToTokens(styles, nodes) {
  * Pull a file. Returns { source: 'variables' | 'styles', default: tree, modes: { name: tree } }.
  * `prefer`: 'auto' (variables, then styles), 'variables', 'styles' or 'both' (styles merged under variables).
  */
+// Variables win over styles, but groups that exist in both are combined rather than replaced.
+function deepMerge(a, b) {
+  const out = { ...a };
+  for (const [k, v] of Object.entries(b)) {
+    const isGroup = x => x && typeof x === 'object' && !Array.isArray(x) && !('$value' in x);
+    out[k] = isGroup(v) && isGroup(out[k]) ? deepMerge(out[k], v) : v;
+  }
+  return out;
+}
+
 export async function pull({ file, token, prefer = 'auto' }) {
   if (!file) throw new Error('Missing Figma file key (the part after /design/ or /file/ in the URL).');
   if (!token) throw new Error('Missing Figma token. Set FIGMA_TOKEN or pass --token.');
@@ -167,7 +177,7 @@ export async function pull({ file, token, prefer = 'auto' }) {
     throw new Error(`No variables or published styles found in file ${file}${varErr ? ` (variables: ${varErr.message})` : ''}.`);
   }
   const { default: def = {}, ...modes } = vars ?? {};
-  const merged = styleTree ? { ...styleTree, ...def } : def;
+  const merged = styleTree ? deepMerge(styleTree, def) : def;
   return { source: vars && styleTree ? 'variables+styles' : vars ? 'variables' : 'styles', default: merged, modes };
 }
 
