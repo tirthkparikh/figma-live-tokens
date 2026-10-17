@@ -12,10 +12,18 @@ async function get(path, token) {
   if (!res.ok) {
     const err = new Error(`Figma API ${res.status}: ${data.message || data.err || res.statusText}`);
     err.status = res.status;
+    if (res.status === 429) {
+      // Figma's limits depend on the seat: "low" (view/collab seats) allows only a handful of file reads
+      err.retryAfter = Number(res.headers.get('retry-after')) || 60;
+      const type = res.headers.get('x-figma-rate-limit-type');
+      err.message = `Figma rate limit${type ? ` (${type}-limit seat)` : ''}: Figma asks to wait ${duration(err.retryAfter)} before reading this file again`;
+    }
     throw err;
   }
   return data;
 }
+
+const duration = sec => (sec >= 86400 ? `${(sec / 86400).toFixed(1)} days` : sec >= 3600 ? `${(sec / 3600).toFixed(1)} hours` : sec >= 60 ? `${Math.ceil(sec / 60)} min` : `${sec}s`);
 
 const hex2 = n => Math.round(Math.max(0, Math.min(1, n)) * 255).toString(16).padStart(2, '0');
 export function rgbaToHex({ r, g, b, a = 1 }, opacity = 1) {
@@ -124,7 +132,10 @@ export function stylesToTokens(styles, nodes) {
         offsetX: `${e.offset?.x ?? 0}px`, offsetY: `${e.offset?.y ?? 0}px`, blur: `${e.radius ?? 0}px`, spread: `${e.spread ?? 0}px`,
         color: rgbaToHex(e.color ?? { r: 0, g: 0, b: 0, a: 0.25 }), inset: e.type === 'INNER_SHADOW',
       }));
+      const blur = (doc.effects ?? []).find(e => e.visible !== false && /BLUR/.test(e.type));
       if (shadows.length) setPath(tree, path, { $type: 'shadow', $value: shadows.length === 1 ? shadows[0] : shadows });
+      // layer/background blur: the radius, for filter: blur(var(--…)) or backdrop-filter
+      else if (blur) setPath(tree, path, { $type: 'dimension', $value: `${blur.radius ?? 0}px`, $description: `${blur.type === 'BACKGROUND_BLUR' ? 'backdrop-filter' : 'filter'}: blur()` });
     }
   }
   return tree;
@@ -144,12 +155,16 @@ function deepMerge(a, b) {
   return out;
 }
 
-export async function pull({ file, token, prefer = 'auto' }) {
+/**
+ * `cache` (optional, reused between calls) keeps the last style nodes: the cheap /styles list is
+ * checked first, and the expensive /nodes download only happens when a style actually changed.
+ */
+export async function pull({ file, token, prefer = 'auto', cache = {} }) {
   if (!file) throw new Error('Missing Figma file key (the part after /design/ or /file/ in the URL).');
   if (!token) throw new Error('Missing Figma token. Set FIGMA_TOKEN or pass --token.');
   file = parseFileKey(file);
   let vars = null, varErr = null;
-  if (prefer !== 'styles') {
+  if (prefer !== 'styles' && !(prefer === 'auto' && cache.noVariables)) {
     try {
       const data = await get(`/v1/files/${file}/variables/local`, token);
       vars = variablesToTokens(data.meta ?? {});
@@ -157,6 +172,7 @@ export async function pull({ file, token, prefer = 'auto' }) {
     } catch (e) {
       if (prefer === 'variables' || (e.status !== 403 && e.status !== 404)) throw e;
       varErr = e;
+      cache.noVariables = true;  // plan without the Variables API: don't spend a request on it every poll
     }
   }
   let styleTree = null;
@@ -164,11 +180,16 @@ export async function pull({ file, token, prefer = 'auto' }) {
     const { meta } = await get(`/v1/files/${file}/styles`, token);
     const styles = meta?.styles ?? [];
     if (styles.length) {
-      const nodes = {};
-      const ids = styles.map(s => s.node_id);
-      for (let i = 0; i < ids.length; i += 200) {
-        const part = await get(`/v1/files/${file}/nodes?ids=${encodeURIComponent(ids.slice(i, i + 200).join(','))}`, token);
-        Object.assign(nodes, part.nodes);
+      const sig = `${file}|${styles.map(s => `${s.node_id}@${s.updated_at ?? ''}`).sort().join(',')}`;
+      let nodes = cache.styleSig === sig ? cache.nodes : null;
+      if (!nodes) {
+        nodes = {};
+        const ids = styles.map(s => s.node_id);
+        for (let i = 0; i < ids.length; i += 200) {
+          const part = await get(`/v1/files/${file}/nodes?ids=${encodeURIComponent(ids.slice(i, i + 200).join(','))}`, token);
+          Object.assign(nodes, part.nodes);
+        }
+        Object.assign(cache, { styleSig: sig, nodes });
       }
       styleTree = stylesToTokens(styles, nodes);
     }

@@ -50,7 +50,7 @@ Add one line to your site, after your normal stylesheet:
 
 What happens:
 
-1. The server pulls tokens from Figma when it starts, then every `--interval` seconds (default 30).
+1. The server pulls tokens from Figma when it starts, then every `--interval` seconds (default 60, minimum 30). Each poll is one cheap request; style details are only downloaded when something changed.
 2. With a [Figma webhook](https://www.figma.com/developers/api#webhooks_v2) (`FILE_UPDATE` or `LIBRARY_PUBLISH`) pointed at `https://tokens.example.com/webhook`, updates arrive within about two seconds of publishing.
 3. When the CSS changes, the server pushes it to every open page over Server-Sent Events. `client.js` swaps the variables in place, so utilities and components restyle immediately.
 4. If Figma is unreachable or a token is broken, the last good CSS keeps being served. Check `GET /status` to see what went wrong.
@@ -148,6 +148,8 @@ await live.refresh();
 ```
 
 ## Figma notes
+
+- **Rate limits.** Figma's REST API limits depend on your seat. On view/collab seats ("low" limit) the file-content endpoint allows only a few reads before Figma asks you to wait, sometimes for days. figma-live-tokens checks the cheap styles list on each poll and downloads style details only when something changed, polls every 60s at most every 30s, and when Figma returns HTTP 429 it pauses polling for exactly as long as Figma asks, while still serving the last good tokens. For live mode on a busy file, use a Dev or Full seat token, or a Figma webhook (`--webhook-passcode`) instead of polling.
 
 - The Variables REST API is available on Figma Enterprise. On other plans the tool reads **published styles** instead. Use `--prefer styles|variables|both` to choose.
 - Give the personal access token read access to file content, library styles and variables (`file_content:read`, `library_content:read`, `file_variables:read`).

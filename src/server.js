@@ -56,11 +56,14 @@ export function createLiveServer(opts = {}) {
     for (const res of clients) res.write(msg);
   };
 
+  const figmaCache = {};
+  let pausedUntil = 0;  // Figma asked us to back off (HTTP 429 Retry-After)
   async function refresh(reason = 'manual') {
+    if (reason === 'poll' && Date.now() < pausedUntil) return;
     if (running) { again = true; return running; }
     running = (async () => {
       try {
-        const src = await loadSource(opts);
+        const src = await loadSource({ ...opts, figmaCache });
         const built = buildFiles(src, render);
         state.error = null;
         state.source = src.source;
@@ -72,7 +75,8 @@ export function createLiveServer(opts = {}) {
         }
       } catch (e) {
         state.error = e.message;
-        log(`refresh failed (${reason}): ${e.message}`);
+        if (e.retryAfter) pausedUntil = Date.now() + e.retryAfter * 1000;
+        log(`refresh failed (${reason}): ${e.message}${e.retryAfter ? '. Polling is paused until then; the last good tokens keep being served.' : ''}`);
       }
     })();
     await running;
@@ -120,7 +124,7 @@ export function createLiveServer(opts = {}) {
     }
     if (req.method === 'GET' && path === '/client.js') return send(res, 200, CLIENT, TYPES.js);
     if (req.method === 'GET' && (path === '/' || path === '/status')) {
-      return send(res, 200, { ok: !state.error, version: state.version, hash: state.hash, tokens: state.count, updatedAt: state.updatedAt, error: state.error, clients: clients.size, files: Object.keys(state.files) });
+      return send(res, 200, { ok: !state.error, version: state.version, hash: state.hash, tokens: state.count, updatedAt: state.updatedAt, error: state.error, pausedUntil: pausedUntil > Date.now() ? new Date(pausedUntil).toISOString() : null, clients: clients.size, files: Object.keys(state.files) });
     }
     const file = path === '/tokens.json' ? 'tokens.flat.json' : path.slice(1);
     if ((req.method === 'GET' || req.method === 'HEAD') && (Object.hasOwn(state.files, file) || (!state.hash && /\.(css|json|js|cjs|ts|scss)$/.test(file)))) {
@@ -155,7 +159,7 @@ export function createLiveServer(opts = {}) {
     async start(port = 4100, host = '0.0.0.0') {
       await refresh('startup');
       if (opts.figma && opts.interval !== 0) {
-        const every = Math.max(10, opts.interval ?? 30) * 1000;
+        const every = Math.max(30, opts.interval ?? 60) * 1000;
         timer = setInterval(() => refresh('poll'), every);
       }
       if (!opts.figma && opts.input) {

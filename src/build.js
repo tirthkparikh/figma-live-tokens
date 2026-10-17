@@ -35,7 +35,7 @@ async function readJson(file) {
  */
 export async function loadSource(opts) {
   if (opts.figma) {
-    const res = await pull({ file: opts.figma, token: opts.token ?? process.env.FIGMA_TOKEN, prefer: opts.prefer });
+    const res = await pull({ file: opts.figma, token: opts.token ?? process.env.FIGMA_TOKEN, prefer: opts.prefer, cache: opts.figmaCache });
     const themes = {};
     for (const [mode, tree] of Object.entries(res.modes)) themes[kebab(mode)] = merge(structuredClone(res.default), tree);
     return { base: res.default, themes, source: `figma:${res.source}` };

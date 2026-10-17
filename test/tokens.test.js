@@ -112,17 +112,20 @@ test('Figma styles -> tokens', () => {
     { node_id: '1', name: 'Brand/Primary', style_type: 'FILL' },
     { node_id: '2', name: 'Heading/H1', style_type: 'TEXT' },
     { node_id: '3', name: 'Elevation/Card', style_type: 'EFFECT' },
+    { node_id: '4', name: 'Modal/BackdropBlur', style_type: 'EFFECT' },
   ];
   const nodes = {
     1: { document: { fills: [{ type: 'SOLID', color: { r: 1, g: 0.5, b: 0, a: 1 }, opacity: 0.5 }] } },
     2: { document: { style: { fontFamily: 'Inter', fontWeight: 700, fontSize: 32, lineHeightPx: 38.4, lineHeightUnit: 'PIXELS', letterSpacing: -0.5 } } },
     3: { document: { effects: [{ type: 'DROP_SHADOW', visible: true, offset: { x: 0, y: 4 }, radius: 12, spread: 0, color: { r: 0, g: 0, b: 0, a: 0.2 } }] } },
+    4: { document: { effects: [{ type: 'BACKGROUND_BLUR', visible: true, radius: 8 }] } },
   };
   const tree = stylesToTokens(styles, nodes);
   assert.equal(tree.Brand.Primary.$value, '#ff800080');
   const t = load(tree);
   assert.deepEqual(cssValue(t.get('Heading.H1')), { 'font-family': 'Inter', 'font-weight': '700', 'font-size': '32px', 'line-height': '38.4px', 'letter-spacing': '-0.5px' });
   assert.equal(cssValue(t.get('Elevation.Card')), '0px 4px 12px 0px #00000033');
+  assert.equal(cssValue(t.get('Modal.BackdropBlur')), '8px');
 });
 
 test('helpers', () => {

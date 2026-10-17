@@ -38,7 +38,7 @@ Output
 Live server (serve)
   --port <n>                 Port                                    (default: 4100)
   --host <addr>              Host                                    (default: 0.0.0.0)
-  --interval <s>             Poll Figma every n seconds, 0 = off     (default: 30)
+  --interval <s>             Poll Figma every n seconds (min 30), 0 = off (default: 60)
   --webhook-passcode <s>     Passcode for Figma webhooks (POST /webhook)
   --refresh-token <s>        Bearer token for POST /refresh
   --cors <origin>            Allowed origin                          (default: *)
@@ -92,7 +92,7 @@ async function config() {
     prefer: flags.prefer ?? cfg.prefer ?? 'auto', sets: (flags.sets ?? cfg.sets)?.toString().split(',').map(s => s.trim()).filter(Boolean),
     themes, formats, prefix: flags.prefix ?? cfg.prefix, refs: !(flags['no-refs'] ?? cfg.refs === false),
     out: flags.out ?? cfg.out ?? 'tokens', port: num(flags.port ?? cfg.port, 'port') ?? 4100, host: flags.host ?? cfg.host ?? '0.0.0.0',
-    interval: num(flags.interval ?? cfg.interval, 'interval') ?? 30, webhookPasscode: flags['webhook-passcode'] ?? cfg.webhookPasscode ?? process.env.FIGMA_WEBHOOK_PASSCODE,
+    interval: num(flags.interval ?? cfg.interval, 'interval') ?? 60, webhookPasscode: flags['webhook-passcode'] ?? cfg.webhookPasscode ?? process.env.FIGMA_WEBHOOK_PASSCODE,
     refreshToken: flags['refresh-token'] ?? cfg.refreshToken, cors: flags.cors ?? cfg.cors,
     // CSS output details, config file only
     selector: cfg.selector, themeSelector: cfg.themeSelector, darkMedia: cfg.darkMedia, classes: cfg.classes,
@@ -161,11 +161,11 @@ try {
     const cfg = await config();
     const live = createLiveServer({ ...cfg, formats: cfg.formats, log: m => console.log(`  ${new Date().toLocaleTimeString()}  ${m}`) });
     const addr = await live.start(cfg.port, cfg.host);
-    if (live.state.error && !live.state.hash) console.error(`\x1b[33m!\x1b[0m first load failed: ${live.state.error} ${cfg.figma && cfg.interval ? '(will keep retrying)' : '(fix it and save again)'}`);
+    if (live.state.error && !live.state.hash) console.error(`\x1b[33m!\x1b[0m first load failed: ${live.state.error} ${/rate limit/.test(live.state.error) ? '' : cfg.figma && cfg.interval ? '(will keep retrying)' : '(fix it and save again)'}`);
     const url = `http://${addr.address === '0.0.0.0' || addr.address === '::' ? 'localhost' : addr.address}:${addr.port}`;
     ok(`live token server on ${url}`);
     console.log(`  CSS:     ${url}/tokens.css\n  Script:  <script src="${url}/client.js" defer></script>`);
-    if (cfg.figma) console.log(`  Figma:   ${cfg.interval ? `polling every ${Math.max(10, cfg.interval)}s` : 'polling off'}${cfg.webhookPasscode ? `, webhook at ${url}/webhook` : ''}`);
+    if (cfg.figma) console.log(`  Figma:   ${cfg.interval ? `polling every ${Math.max(30, cfg.interval)}s` : 'polling off'}${cfg.webhookPasscode ? `, webhook at ${url}/webhook` : ''}`);
     const stop = () => live.stop().then(() => process.exit(0));
     process.on('SIGINT', stop); process.on('SIGTERM', stop);
   } else {

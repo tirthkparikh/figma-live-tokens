@@ -43,3 +43,40 @@ test('server: no prototype keys, 400 on null webhook body', async () => {
     assert.equal((await fetch(u('/status')).then(r => r.json())).source, undefined);
   } finally { await live.stop(); }
 });
+
+test('Tailwind names drop a repeated category word; blur gets its own bucket', () => {
+  const t = load({
+    'Card Shadow': { $type: 'shadow', $value: { offsetX: '0px', offsetY: '2px', blur: '4px', spread: '0px', color: '#0003' } },
+    Modal: { BackdropBlur: { $type: 'dimension', $value: '15px' } },
+  });
+  const tw = render(t, { formats: ['tailwind4'] })['tailwind.theme.css'];
+  assert.match(tw, /--shadow-card: var\(--card-shadow\)/);
+  assert.match(tw, /--blur-modal-backdrop: var\(--modal-backdrop-blur\)/);
+});
+
+test('Figma: style nodes are only downloaded when a style changed; 429 Retry-After is reported', async () => {
+  const { pull } = await import('../src/figma.js');
+  const http = await import('node:http');
+  let nodesCalls = 0, updated = '2026-01-01', limited = false;
+  const srv = http.createServer((req, res) => {
+    const json = (code, body, headers = {}) => { res.writeHead(code, { 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(body)); };
+    if (limited) return json(429, { status: 429, err: 'Rate limit exceeded' }, { 'Retry-After': '7200', 'X-Figma-Rate-Limit-Type': 'low' });
+    if (req.url.includes('/variables/local')) return json(403, { message: 'Forbidden' });
+    if (req.url.includes('/styles')) return json(200, { meta: { styles: [{ node_id: '1', name: 'Brand/Primary', style_type: 'FILL', updated_at: updated }] } });
+    if (req.url.includes('/nodes')) { nodesCalls++; return json(200, { nodes: { 1: { document: { fills: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 } }] } } } }); }
+    json(404, {});
+  });
+  await new Promise(ok => srv.listen(0, '127.0.0.1', ok));
+  process.env.FIGMA_API_URL = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    const cache = {};
+    await pull({ file: 'abc', token: 't', cache });
+    await pull({ file: 'abc', token: 't', cache });
+    assert.equal(nodesCalls, 1, 'unchanged styles must not re-download nodes');
+    updated = '2026-02-02';
+    await pull({ file: 'abc', token: 't', cache });
+    assert.equal(nodesCalls, 2);
+    limited = true;
+    await assert.rejects(pull({ file: 'abc', token: 't', cache }), e => e.retryAfter === 7200 && /low-limit seat/.test(e.message) && /2\.0 hours/.test(e.message));
+  } finally { delete process.env.FIGMA_API_URL; srv.close(); }
+});
