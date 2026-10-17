@@ -130,3 +130,12 @@ test('helpers', () => {
   assert.equal(parseFileKey('https://www.figma.com/design/AbC123xyz/My-File?node-id=0-1'), 'AbC123xyz');
   assert.equal(parseFileKey('AbC123xyz'), 'AbC123xyz');
 });
+
+test('custom selectors and no dark media query', () => {
+  const base = load({ c: { $type: 'color', $value: '#fff' } });
+  const dark = load({ c: { $type: 'color', $value: '#000' } });
+  const out = css(base, { themes: { dark }, selector: '.preview', themeSelector: '.preview[data-mode="{name}"]', darkMedia: false });
+  assert.match(out, /^\.preview \{/m);
+  assert.match(out, /\.preview\[data-mode="dark"\] \{\n  --c: #000;/);
+  assert.doesNotMatch(out, /prefers-color-scheme/);
+});

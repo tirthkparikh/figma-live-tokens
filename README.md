@@ -112,9 +112,14 @@ npx figma-live-tokens build tokens.json --sets core,light --theme dark=sets:core
   "formats": ["css", "tailwind4", "js"],
   "out": "src/tokens",
   "prefix": "ds",
-  "interval": 60
+  "interval": 60,
+  "selector": ":root",
+  "themeSelector": "[data-theme=\"{name}\"]",
+  "darkMedia": true
 }
 ```
+
+`selector` is where base variables go, `themeSelector` is the selector for each theme (`{name}` is replaced), and `darkMedia: false` turns off the automatic `prefers-color-scheme` block for the `dark` theme.
 
 ## Use from code
 

@@ -41,7 +41,10 @@ const safeEqual = (a, b) => {
  */
 export function createLiveServer(opts = {}) {
   const log = opts.log ?? (() => {});
-  const render = { formats: [...new Set(['css', 'json', ...(opts.formats ?? [])])], prefix: opts.prefix, refs: opts.refs };
+  const render = {
+    formats: [...new Set(['css', 'json', ...(opts.formats ?? [])])], prefix: opts.prefix, refs: opts.refs,
+    selector: opts.selector, themeSelector: opts.themeSelector, darkMedia: opts.darkMedia, classes: opts.classes,
+  };
   const clients = new Set();
   const state = { files: {}, hash: null, version: 0, updatedAt: null, error: null, count: 0, source: null };
   let running = null, again = false, timer = null, debounce = null;

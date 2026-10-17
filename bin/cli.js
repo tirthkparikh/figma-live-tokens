@@ -94,6 +94,8 @@ async function config() {
     out: flags.out ?? cfg.out ?? 'tokens', port: num(flags.port ?? cfg.port, 'port') ?? 4100, host: flags.host ?? cfg.host ?? '0.0.0.0',
     interval: num(flags.interval ?? cfg.interval, 'interval') ?? 30, webhookPasscode: flags['webhook-passcode'] ?? cfg.webhookPasscode ?? process.env.FIGMA_WEBHOOK_PASSCODE,
     refreshToken: flags['refresh-token'] ?? cfg.refreshToken, cors: flags.cors ?? cfg.cors,
+    // CSS output details, config file only
+    selector: cfg.selector, themeSelector: cfg.themeSelector, darkMedia: cfg.darkMedia, classes: cfg.classes,
   };
 }
 
